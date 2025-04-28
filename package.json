@@ -1,12 +1,53 @@
 {
-  "dependencies": { "@paralleldrive/cuid2": "^2.2.2", "@types/express": "^5.0.1", "@types/winston": "^2.4.4", "cookie-parser": "^1.4.7", "cors": "^2.8.5", "dotenv": "^16.5.0", "drizzle-orm": "^0.43.1", "express": "^5.1.0", "express-rate-limit": "^7.5.0", "helmet": "^8.1.0", "http-status": "^2.1.0", "jsonwebtoken": "^9.0.2", "mailtrap": "^4.1.0", "neverthrow": "^8.2.0", "pg": "^8.15.6", "winston": "^3.17.0", "zod": "^3.24.3" },
+  "dependencies": {
+    "@paralleldrive/cuid2": "^2.2.2",
+    "@types/express": "^5.0.1",
+    "@types/winston": "^2.4.4",
+    "bcrypt": "^5.1.1",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "drizzle-orm": "^0.43.1",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "http-status": "^2.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mailtrap": "^4.1.0",
+    "neverthrow": "^8.2.0",
+    "pg": "^8.15.6",
+    "winston": "^3.17.0",
+    "zod": "^3.24.3"
+  },
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
+    "@types/cookie-parser": "^1.4.8",
     "@types/cors": "^2.8.17",
     "@types/jsonwebtoken": "^9.0.9",
     "@types/pg": "^8.11.14",
     "drizzle-kit": "^0.31.0",
     "eslint-plugin-neverthrow": "^1.1.4",
     "tsx": "^4.19.3"
-  }
+  },
+  "name": "autorite",
+  "version": "1.0.0",
+  "description": "auth server",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "bun run src/server.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quantinium3/autorite.git"
+  },
+  "keywords": [
+    "auth"
+  ],
+  "author": "quantinium3",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/quantinium3/autorite/issues"
+  },
+  "homepage": "https://github.com/quantinium3/autorite#readme"
 }

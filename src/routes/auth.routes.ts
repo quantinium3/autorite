@@ -1,5 +1,9 @@
 import { Router } from "express";
-import { handleSignup } from "../controller/auth.controller";
+import * as authController from "../controller/auth.controller.ts"
 
-const authRouter = Router();
-authRouter.post('/signup', handleSignup)
+export const authRouter = Router();
+
+authRouter.post('/signup', authController.handleSignup);
+authRouter.post('/signin', authController.handleSignIn);
+authRouter.post('/signout', authController.handleSignOut);
+authRouter.post('/refresh', authController.handleRefresh);
