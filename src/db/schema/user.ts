@@ -19,13 +19,15 @@ export const userTable = pgTable("user", {
 
 export const sessionTable = pgTable("session", {
     id: text("id").primaryKey(),
-    userId: text("user_id").notNull().references(() => userTable.id),
-    refreshToken: varchar("refresh_token"),
+    userId: text("user_id")
+        .notNull()
+        .references(() => userTable.id, { onDelete: "cascade" }),
+    refreshToken: varchar("refresh_token", { length: 255 }).notNull(),
     expiresAt: timestamp("expires_at", {
         withTimezone: true,
         mode: "date",
-    }).notNull()
-})
+    }).notNull(),
+});
 
 export type User = InferSelectModel<typeof userTable>;
 export type Session = InferSelectModel<typeof sessionTable>;
