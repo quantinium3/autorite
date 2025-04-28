@@ -300,3 +300,71 @@ export const handleRefresh = async (req: Request, res: Response) => {
         })
     })
 }
+
+export const handleForgotPassword = async (req: Request, res: Response) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(status.BAD_REQUEST).json({
+            message: "Email is required",
+        })
+    }
+
+    const user = await db.select().from(userTable).where(eq(userTable.email, email));
+    if (user.length === 0) {
+        return res.status(status.NOT_FOUND).json({
+            message: "User not found",
+        })
+    }
+
+    if (!user[0].isVerified) {
+        return res.status(status.UNAUTHORIZED).json({
+            message: "Unauthorized access. Verify your email"
+        })
+    }
+
+    const resetToken = createId();
+    const expiresAt = new Date(Date.now() + HOUR)
+
+    await db.insert(emailVerificationTable).values({ token: resetToken, expiresAt, email })
+
+    sendResetEmail(email, resetToken);
+
+    return res.status(status.OK).json({
+        message: "Password reset email sent"
+    })
+}
+
+export const handleResetPassword = async (req: Request, res: Response) => {
+    const { token } = req.params;
+    const { newPassword } = req.body;
+
+    if (!token) {
+        res.status(status.BAD_REQUEST).json({
+            message: "token is required",
+        })
+    }
+
+    if (!newPassword) {
+        res.status(status.BAD_REQUEST).json({
+            message: "Password is required"
+        })
+    }
+
+    const resetToken = await db.select().from(emailVerificationTable).where(eq(emailVerificationTable.token, token))
+    const isTokenValid = new Date() < resetToken[0].expiresAt;
+    if (!isTokenValid) {
+        return res.status(status.UNAUTHORIZED).json({
+            message: "Unauthorized request. invalid or expired token"
+        })
+    }
+
+    const hashedPassword = await hash(newPassword, 12)
+    await db.update(userTable).set({ password: hashedPassword }).where(eq(userTable.id, sessionTable.userId)).returning()
+
+    await db.delete(emailVerificationTable).where(eq(emailVerificationTable.id, sessionTable.userId))
+    await db.delete(sessionTable).where(eq(sessionTable.userId, resetToken[0].id))
+    return res.status(status.OK).json({
+        message: "Password reset successfully"
+    })
+}
