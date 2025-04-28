@@ -9,6 +9,7 @@ import { compare, hash } from 'bcrypt';
 import { emailVerificationTable } from '../db/schema/email.ts';
 import { config } from '../config/config.ts';
 import { createAccessToken, createRefreshToken } from '../utils/auth.utils.ts';
+import { type Request, type Response } from "express";
 
 const userSignUpSchema = z.object({
     username: z.string().min(3),
@@ -24,7 +25,7 @@ const userSignInSchema = z.object({
 const SALT_ROUNDS = 12;
 const HOUR = 60 * 60 * 1000;
 
-export const handleSignup = async (req, res) => {
+export const handleSignup = async (req: Request, res: Response) => {
     const parsedBody = userSignUpSchema.safeParse(req.body)
     if (!parsedBody.success) {
         return res.status(httpStatus.BAD_REQUEST).json({
@@ -93,7 +94,7 @@ export const handleSignup = async (req, res) => {
     }
 }
 
-export const loginUser = async (req, res) => {
+export const loginUser = async (req: Request, res: Response) => {
     const cookies = req.cookies;
     const parsedBody = userSignInSchema.safeParse(req.body);
     if (!parsedBody.success) {
@@ -101,15 +102,15 @@ export const loginUser = async (req, res) => {
             message: `Invalid email or password: ${parsedBody.error}`,
         });
     }
-    
+
     const user = parsedBody.data;
-    
+
     try {
         const existingUserByEmail = await db
             .selectDistinct()
             .from(userTable)
             .where(eq(userTable.email, user.email));
-        
+
         if (!existingUserByEmail || existingUserByEmail.length === 0) {
             return res.status(httpStatus.UNAUTHORIZED).json({
                 message: "User doesn't exist"
@@ -129,7 +130,7 @@ export const loginUser = async (req, res) => {
                 .selectDistinct()
                 .from(sessionTable)
                 .where(eq(sessionTable.refreshToken, refreshToken));
-            
+
             if (!existingToken || existingToken.length === 0 || existingToken[0].userId !== existingUserByEmail[0].id) {
                 await db.delete(sessionTable)
                     .where(eq(sessionTable.userId, existingUserByEmail[0].id));
@@ -137,31 +138,32 @@ export const loginUser = async (req, res) => {
                 await db.delete(sessionTable)
                     .where(eq(sessionTable.refreshToken, refreshToken));
             }
-            
+
             res.clearCookie(config.tokens.refresh_secret_name, {
                 httpOnly: true,
                 secure: true,
-                sameSite: 'Strict',
+                sameSite: 'strict',
                 path: '/'
             });
         }
 
         const accessToken = createAccessToken(existingUserByEmail[0].id);
         const newRefreshToken = createRefreshToken(existingUserByEmail[0].id);
-        
+
         const expiresAt = new Date();
         expiresAt.setHours(expiresAt.getHours() + 24);
-        
+
         await db.insert(sessionTable).values({
+            id: createId(),
             refreshToken: newRefreshToken,
             userId: existingUserByEmail[0].id,
             expiresAt: expiresAt
-        }).onConflictDoUpdate({ 
-            target: sessionTable.userId, 
-            set: { 
+        }).onConflictDoUpdate({
+            target: sessionTable.userId,
+            set: {
                 refreshToken: newRefreshToken,
                 expiresAt: expiresAt
-            } 
+            }
         });
 
         res.cookie(
