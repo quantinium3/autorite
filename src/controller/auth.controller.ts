@@ -1,4 +1,4 @@
-import httpStatus from 'http-status';
+import { status } from 'http-status';
 import z from "zod";
 import { db } from '../db';
 import { sessionTable, userTable } from '../db/schema/user';
@@ -28,7 +28,7 @@ const HOUR = 60 * 60 * 1000;
 export const handleSignup = async (req: Request, res: Response) => {
     const parsedBody = userSignUpSchema.safeParse(req.body)
     if (!parsedBody.success) {
-        return res.status(httpStatus.BAD_REQUEST).json({
+        return res.status(status.BAD_REQUEST).json({
             error: parsedBody.error
         })
     }
@@ -36,21 +36,21 @@ export const handleSignup = async (req: Request, res: Response) => {
     const user = parsedBody.data
 
     if (!user.username || !user.email || !user.password) {
-        return res.status(httpStatus.BAD_REQUEST).json({
+        return res.status(status.BAD_REQUEST).json({
             message: "Username, Email and password are required"
         })
     }
 
     const existingUserByEmail = await db.select().from(userTable).where(eq(userTable.email, user.email)).limit(1);
     if (existingUserByEmail) {
-        return res.status(httpStatus.CONFLICT).json({
+        return res.status(status.CONFLICT).json({
             message: "User with the same email already exists",
         })
     }
 
     const existingUserByUsername = await db.select().from(userTable).where(eq(userTable.username, user.username)).limit(1);
     if (existingUserByUsername) {
-        return res.status(httpStatus.CONFLICT).json({
+        return res.status(status.CONFLICT).json({
             message: "User with the same username exists",
         })
     }
@@ -78,17 +78,17 @@ export const handleSignup = async (req: Request, res: Response) => {
                 console.log(`successfully sent the email: ${sent}`)
             },
             (error: Error) => {
-                return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({
+                return res.status(status.INTERNAL_SERVER_ERROR).json({
                     message: `Failed to send verification Email: ${error.message}`
                 })
             }
         )
 
-        res.status(httpStatus.OK).json({
+        res.status(status.OK).json({
             message: "New User created successfully"
         })
     } catch (err) {
-        return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({
+        return res.status(status.INTERNAL_SERVER_ERROR).json({
             message: `Failed to create user: ${err}`
         })
     }
@@ -98,7 +98,7 @@ export const handleSignIn = async (req: Request, res: Response) => {
     const cookies = req.cookies;
     const parsedBody = userSignInSchema.safeParse(req.body);
     if (!parsedBody.success) {
-        return res.status(httpStatus.BAD_REQUEST).json({
+        return res.status(status.BAD_REQUEST).json({
             message: `Invalid email or password: ${parsedBody.error}`,
         });
     }
@@ -112,14 +112,14 @@ export const handleSignIn = async (req: Request, res: Response) => {
             .where(eq(userTable.email, user.email));
 
         if (!existingUserByEmail || existingUserByEmail.length === 0) {
-            return res.status(httpStatus.UNAUTHORIZED).json({
+            return res.status(status.UNAUTHORIZED).json({
                 message: "User doesn't exist"
             });
         }
 
         const passwdIsValid = await compare(user.password, existingUserByEmail[0].password);
         if (!passwdIsValid) {
-            return res.status(httpStatus.UNAUTHORIZED).json({
+            return res.status(status.UNAUTHORIZED).json({
                 message: "Password is invalid"
             });
         }
@@ -178,8 +178,9 @@ export const handleSignIn = async (req: Request, res: Response) => {
             accessToken: accessToken,
         });
     } catch (err) {
-        return res.status(httpStatus.INTERNAL_SERVER_ERROR).json({
+        return res.status(status.INTERNAL_SERVER_ERROR).json({
             message: `Failed to login user: ${err}`
         });
     }
 }
+
