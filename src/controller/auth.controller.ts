@@ -94,7 +94,7 @@ export const handleSignup = async (req: Request, res: Response) => {
     }
 }
 
-export const loginUser = async (req: Request, res: Response) => {
+export const handleSignIn = async (req: Request, res: Response) => {
     const cookies = req.cookies;
     const parsedBody = userSignInSchema.safeParse(req.body);
     if (!parsedBody.success) {
