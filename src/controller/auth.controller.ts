@@ -10,6 +10,8 @@ import { emailVerificationTable } from '../db/schema/email.ts';
 import { config } from '../config/config.ts';
 import { createAccessToken, createRefreshToken } from '../utils/auth.utils.ts';
 import { type Request, type Response } from "express";
+import { verify } from 'jsonwebtoken';
+import { logger } from '../middleware/logger.ts';
 
 const userSignUpSchema = z.object({
     username: z.string().min(3),
@@ -27,160 +29,274 @@ const HOUR = 60 * 60 * 1000;
 
 export const handleSignup = async (req: Request, res: Response) => {
     const parsedBody = userSignUpSchema.safeParse(req.body)
+
     if (!parsedBody.success) {
         return res.status(status.BAD_REQUEST).json({
-            error: parsedBody.error
+            error: parsedBody.error,
         })
     }
 
-    const user = parsedBody.data
+    const { username, email, password } = parsedBody.data
 
-    if (!user.username || !user.email || !user.password) {
+    if (!username || !email || !password) {
         return res.status(status.BAD_REQUEST).json({
-            message: "Username, Email and password are required"
+            message: "Username, Email and Password are required",
         })
     }
-
-    const existingUserByEmail = await db.select().from(userTable).where(eq(userTable.email, user.email)).limit(1);
-    if (existingUserByEmail) {
-        return res.status(status.CONFLICT).json({
-            message: "User with the same email already exists",
-        })
-    }
-
-    const existingUserByUsername = await db.select().from(userTable).where(eq(userTable.username, user.username)).limit(1);
-    if (existingUserByUsername) {
-        return res.status(status.CONFLICT).json({
-            message: "User with the same username exists",
-        })
-    }
-
-    const hashedPasswd = await hash(user.password, SALT_ROUNDS)
-    const token = createId();
 
     try {
+        const [existingUserByEmail] = await db.select().from(userTable).where(eq(userTable.email, email)).limit(1)
+        if (existingUserByEmail) {
+            return res.status(status.CONFLICT).json({
+                message: "User with the same email already exists",
+            })
+        }
+
+        const [existingUserByUsername] = await db.select().from(userTable).where(eq(userTable.username, username)).limit(1)
+        if (existingUserByUsername) {
+            return res.status(status.CONFLICT).json({
+                message: "User with the same username already exists",
+            })
+        }
+
+        const hashedPassword = await hash(password, SALT_ROUNDS)
+        const userId = createId()
+        const emailToken = createId()
+
         await db.insert(userTable).values({
-            id: createId(),
-            username: user.username,
-            email: user.email,
-            password: hashedPasswd,
-        });
+            id: userId,
+            username,
+            email,
+            password: hashedPassword,
+        })
 
         await db.insert(emailVerificationTable).values({
             id: createId(),
-            email: user.email,
-            token: token,
-            expiresAt: new Date(Date.now() + HOUR)
+            email,
+            token: emailToken,
+            expiresAt: new Date(Date.now() + HOUR),
         })
 
-        sendEmail(token, user.email).match(
+        const emailResult = await sendEmail(emailToken, email)
+
+        emailResult.match(
             (sent: boolean) => {
-                console.log(`successfully sent the email: ${sent}`)
+                console.log(`Successfully sent verification email: ${sent}`)
             },
             (error: Error) => {
-                return res.status(status.INTERNAL_SERVER_ERROR).json({
-                    message: `Failed to send verification Email: ${error.message}`
-                })
+                logger.error(`Failed to send verification email: ${error.message}`)
             }
         )
 
-        res.status(status.OK).json({
-            message: "New User created successfully"
+        return res.status(status.OK).json({
+            message: "New user created successfully. Please check your email to verify your account.",
         })
+
     } catch (err) {
+        logger.error(err)
         return res.status(status.INTERNAL_SERVER_ERROR).json({
-            message: `Failed to create user: ${err}`
+            message: `Failed to create user`,
         })
     }
 }
 
 export const handleSignIn = async (req: Request, res: Response) => {
-    const cookies = req.cookies;
-    const parsedBody = userSignInSchema.safeParse(req.body);
+    const cookies = req.cookies
+    const parsedBody = userSignInSchema.safeParse(req.body)
+
     if (!parsedBody.success) {
         return res.status(status.BAD_REQUEST).json({
             message: `Invalid email or password: ${parsedBody.error}`,
-        });
+        })
     }
 
-    const user = parsedBody.data;
+    const { email, password } = parsedBody.data
 
     try {
-        const existingUserByEmail = await db
-            .selectDistinct()
-            .from(userTable)
-            .where(eq(userTable.email, user.email));
+        const existingUsers = await db.select().from(userTable).where(eq(userTable.email, email))
+        const existingUser = existingUsers[0]
 
-        if (!existingUserByEmail || existingUserByEmail.length === 0) {
+        if (!existingUser) {
             return res.status(status.UNAUTHORIZED).json({
-                message: "User doesn't exist"
-            });
+                message: "User doesn't exist",
+            })
         }
 
-        const passwdIsValid = await compare(user.password, existingUserByEmail[0].password);
-        if (!passwdIsValid) {
+        const passwordIsValid = await compare(password, existingUser.password)
+        if (!passwordIsValid) {
             return res.status(status.UNAUTHORIZED).json({
-                message: "Password is invalid"
-            });
+                message: "Password is invalid",
+            })
         }
 
         if (cookies?.[config.tokens.refresh_secret_name]) {
-            const refreshToken = cookies[config.tokens.refresh_secret_name];
-            const existingToken = await db
-                .selectDistinct()
-                .from(sessionTable)
-                .where(eq(sessionTable.refreshToken, refreshToken));
+            const oldRefreshToken = cookies[config.tokens.refresh_secret_name]
 
-            if (!existingToken || existingToken.length === 0 || existingToken[0].userId !== existingUserByEmail[0].id) {
-                await db.delete(sessionTable)
-                    .where(eq(sessionTable.userId, existingUserByEmail[0].id));
+            const existingSession = await db
+                .select()
+                .from(sessionTable)
+                .where(eq(sessionTable.refreshToken, oldRefreshToken))
+
+            if (existingSession.length === 0 || existingSession[0].userId !== existingUser.id) {
+                await db.delete(sessionTable).where(eq(sessionTable.userId, existingUser.id))
             } else {
-                await db.delete(sessionTable)
-                    .where(eq(sessionTable.refreshToken, refreshToken));
+                await db.delete(sessionTable).where(eq(sessionTable.refreshToken, oldRefreshToken))
             }
 
             res.clearCookie(config.tokens.refresh_secret_name, {
                 httpOnly: true,
                 secure: true,
                 sameSite: 'strict',
-                path: '/'
-            });
+                path: '/',
+            })
         }
 
-        const accessToken = createAccessToken(existingUserByEmail[0].id);
-        const newRefreshToken = createRefreshToken(existingUserByEmail[0].id);
+        const accessToken = createAccessToken(existingUser.id)
+        const newRefreshToken = createRefreshToken(existingUser.id)
 
-        const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 24);
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000) // 1 day expiry
 
         await db.insert(sessionTable).values({
             id: createId(),
             refreshToken: newRefreshToken,
-            userId: existingUserByEmail[0].id,
-            expiresAt: expiresAt
+            userId: existingUser.id,
+            expiresAt,
         }).onConflictDoUpdate({
             target: sessionTable.userId,
             set: {
                 refreshToken: newRefreshToken,
-                expiresAt: expiresAt
-            }
-        });
+                expiresAt,
+            },
+        })
 
-        res.cookie(
-            config.tokens.refresh_secret_name, newRefreshToken, {
+        res.cookie(config.tokens.refresh_secret_name, newRefreshToken, {
             httpOnly: true,
             sameSite: 'none',
             secure: true,
-            maxAge: 24 * 60 * 60 * 1000
-        });
+            maxAge: 24 * 60 * 60 * 1000, // 1 day
+            path: '/',
+        })
 
-        return res.status(200).json({
-            accessToken: accessToken,
-        });
-    } catch (err) {
+        return res.status(status.OK).json({
+            accessToken,
+        })
+
+    } catch (error) {
+        logger.error(error)
+
         return res.status(status.INTERNAL_SERVER_ERROR).json({
-            message: `Failed to login user: ${err}`
-        });
+            message: "Failed to login user",
+        })
     }
 }
 
+export const handleSignOut = async (req: Request, res: Response) => {
+    const cookies = req.cookies;
+    if (!cookies[config.tokens.refresh_secret_name]) {
+        return res.status(status.NO_CONTENT).json({
+            message: "user is already signed out."
+        })
+    }
+
+    const refreshToken = cookies[config.tokens.refresh_secret_name]
+
+    const session = await db.select().from(sessionTable).where(eq(sessionTable.refreshToken, refreshToken));
+    if (session.length === 0) {
+        res.clearCookie(config.tokens.refresh_secret_name, {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'strict',
+            path: '/'
+        })
+        res.status(status.NO_CONTENT).json({
+            message: "user is signed out."
+        })
+    }
+
+    await db.delete(sessionTable).where(eq(sessionTable.refreshToken, refreshToken))
+
+    res.clearCookie(config.tokens.refresh_secret_name, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict',
+        path: '/'
+    })
+
+    return res.status(status.NO_CONTENT).json({
+        message: "User is signed out"
+    });
+}
+
+export const handleRefresh = async (req: Request, res: Response) => {
+    const refreshToken: string | undefined = req.cookies[config.tokens.refresh_secret_name]
+
+    if (!refreshToken) {
+        return res.status(status.UNAUTHORIZED).json({
+            message: "Unauthorized request. No refresh token found",
+        })
+    }
+
+    res.clearCookie(config.tokens.refresh_secret_name, {
+        httpOnly: true,
+        secure: true,
+        sameSite: 'strict',
+        path: '/',
+    })
+
+    const foundSessions = await db.select().from(sessionTable)
+        .where(eq(sessionTable.refreshToken, refreshToken))
+
+    const foundSession = foundSessions[0]
+
+    verify(refreshToken, config.tokens.refresh_secret, async (err, payload: any) => {
+        if (err) {
+            return res.status(status.FORBIDDEN).json({
+                message: "Invalid refresh token",
+            })
+        }
+
+        const userId = payload.userId
+
+        if (!foundSession) {
+            logger.warn('Attempted refresh token reuse!')
+
+            await db.delete(sessionTable).where(eq(sessionTable.userId, userId))
+
+            return res.status(status.FORBIDDEN).json({
+                message: "Unauthorized access. Token reuse detected.",
+            })
+        }
+
+        if (foundSession.userId !== userId) {
+            return res.status(status.FORBIDDEN).json({
+                message: "Refresh token userId doesn't match.",
+            })
+        }
+
+        await db.delete(sessionTable).where(eq(sessionTable.refreshToken, refreshToken))
+
+        const accessToken = createAccessToken(userId)
+        const newRefreshToken = createRefreshToken(userId)
+
+        await db.insert(sessionTable).values({
+            id: createId(),
+            refreshToken: newRefreshToken,
+            userId,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        }).catch((err: Error) => {
+            logger.error(err)
+        })
+
+        res.cookie(config.tokens.refresh_secret_name, newRefreshToken, {
+            httpOnly: true,
+            sameSite: 'none',
+            secure: true,
+            maxAge: 24 * 60 * 60 * 1000,
+            path: '/',
+        })
+
+        return res.status(status.OK).json({
+            accessToken,
+        })
+    })
+}
